@@ -1,24 +1,18 @@
-# gemini_client.py - ОНОВЛЕНА ВЕРСІЯ
-import google.generativeai as genai
+from google import genai
+from typing import Literal
 import os
 
 API_KEY = os.getenv("API_KEY")
 
 class GeminiClient:
     def __init__(self):
-        if not API_KEY:
-            raise ValueError("❌ API_KEY не знайдено!")
-        
-        # НОВИЙ СПОСІБ:
-        genai.configure(api_key=API_KEY)
-        
+        self.client = genai.Client(api_key=API_KEY)
         self.current_mode = "asistant"
         self.system_instructions = {}
         self._load_instructions_from_files()
-        self.model = None  # Ініціалізуємо пізніше
     
     def _load_instructions_from_files(self):
-        """Завантажити інструкції"""
+        """Просто завантажує інструкції з файлів якщо вони є"""
         instructions_dir = "instructions"
         
         if os.path.exists(instructions_dir):
@@ -30,51 +24,57 @@ class GeminiClient:
                         with open(filepath, 'r', encoding='utf-8') as f:
                             self.system_instructions[mode_name] = f.read()
                     except:
-                        pass
+                        pass  # Хуй з ним якщо файл не читається
+        
+        # Якщо нема файлів - залишаємо порожні інструкції
+        if not self.system_instructions:
+            # Можеш додати дефолтні якщо хочеш, але як сказав - хуй з тим
+            pass
     
     def set_mode(self, mode: str):
-        """Встановити режим"""
+        """Встановлює режим поведінки"""
         if mode in self.system_instructions:
             self.current_mode = mode
             return True
+        # Якщо такого режиму нема - використовуємо без інструкцій
         self.current_mode = mode
         return False
     
     def get_available_modes(self):
-        """Доступні режими"""
+        """Повертає доступні режими (тільки ті що є у файлах)"""
         return list(self.system_instructions.keys())
     
     def ask(self, prompt: str) -> str:
-        """Запитати AI"""
         try:
-            # Створюємо модель (НОВИЙ API!)
-            if not self.model:
-                self.model = genai.GenerativeModel('gemini-1.5-flash')
+            # Якщо є інструкції для поточного режиму - використовуємо
+            config = {
+                "system_instruction": self.system_instructions[self.current_mode],
+                # "generation_config": {
+                #     "max_output_tokens": 2048,  # Коротші відповіді
+                #     "temperature": 0.7,  # Менше випадковості
+                #     "top_p": 0.5,
+                #     "top_k": 0.5,
+                    
+                # },
+                # "safety_settings": [
+                #     {
+                #         "category": "HARM_CATEGORY_HARASSMENT",
+                #         "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                #     }
+                # ]
+            }
             
-            # Додаємо системну інструкцію
-            system_instruction = None
-            if self.current_mode in self.system_instructions:
-                system_instruction = self.system_instructions[self.current_mode]
-            
-            # Генеруємо відповідь
-            if system_instruction:
-                # З системною інструкцією
-                response = self.model.generate_content(
-                    f"{system_instruction}\n\n{prompt}"
-                )
-            else:
-                # Без системної інструкції
-                response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=config
+            )
             
             if response.text:
                 return response.text
             return "Отримано порожню відповідь."
             
         except Exception as e:
-            error_msg = str(e)
-            if "429" in error_msg or "quota" in error_msg:
-                return "Ліміт вичерпано. Спробуй пізніше."
-            elif "safety" in error_msg.lower():
-                return "Запит заблоковано через політику безпеки."
-            else:
-                return f"Помилка: {error_msg[:100]}"
+            if "429" in str(e):
+                return "Ліміт вичерпано. Почекай 30 секунд."
+            return f"Помилка API: {str(e)}"
